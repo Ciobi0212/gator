@@ -21,6 +21,7 @@ var mapCommands = map[string]func(*state.AppState, []string) error{
 	"login":    handleLogin,
 	"register": handleRegister,
 	"reset":    handleReset,
+	"users":    handleUsers,
 }
 
 func (c *Command) Run(state *state.AppState) error {
@@ -113,6 +114,26 @@ func handleReset(state *state.AppState, params []string) error {
 	}
 
 	fmt.Println("All users have been deleted !")
+
+	return nil
+}
+
+func handleUsers(state *state.AppState, params []string) error {
+	users, err := state.Db.GetAllUsers(context.Background())
+
+	if err != nil {
+		return fmt.Errorf("err getting all users: %w", err)
+	}
+
+	for _, user := range users {
+		str := "* " + user.Name
+
+		if state.Cfg.Current_username == user.Name {
+			str += " (current)"
+		}
+
+		fmt.Println(str)
+	}
 
 	return nil
 }

@@ -24,7 +24,7 @@ RETURNING id, created_at, updated_at, name
 `
 
 type CreateUserParams struct {
-	ID        uuid.NullUUID
+	ID        uuid.UUID
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	Name      string
@@ -54,6 +54,23 @@ DELETE from users
 func (q *Queries) DeleteAllUsers(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, deleteAllUsers)
 	return err
+}
+
+const findUserById = `-- name: FindUserById :one
+SELECT id, created_at, updated_at, name from users 
+WHERE id = $1
+`
+
+func (q *Queries) FindUserById(ctx context.Context, id uuid.UUID) (User, error) {
+	row := q.db.QueryRowContext(ctx, findUserById, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Name,
+	)
+	return i, err
 }
 
 const findUserByName = `-- name: FindUserByName :one

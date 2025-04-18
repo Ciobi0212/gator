@@ -12,6 +12,10 @@ RETURNING *;
 SELECT * from users 
 WHERE name = $1;
 
+-- name: FindUserById :one
+SELECT * from users 
+WHERE id = $1;
+
 -- name: DeleteAllUsers :exec
 DELETE from users;
 

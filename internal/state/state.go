@@ -22,8 +22,6 @@ func GetInitState() (*AppState, error) {
 
 	db, err := sql.Open("postgres", cfg.Db_url)
 
-	db.context
-
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to db: %w", err)
 	}

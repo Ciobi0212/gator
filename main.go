@@ -2,34 +2,38 @@ package main
 
 import (
 	"fmt"
+	"os"
 
-	"github.com/Ciobi0212/gator.git/internal/config"
+	"github.com/Ciobi0212/gator.git/internal/commands"
+	"github.com/Ciobi0212/gator.git/internal/state"
 )
 
 func main() {
-	cfg, err := config.ReadConfig()
+	state, err := state.GetInitState()
 
 	if err != nil {
-		fmt.Println(err)
+		fmt.Println(fmt.Errorf("error initiating state: %w", err))
 		return
 	}
 
-	fmt.Println("Config loaded")
+	args := os.Args
 
-	err = cfg.SetUser("ciobi")
+	if len(args) < 2 {
+		fmt.Println("Not enough args we're given")
+		os.Exit(1)
+	}
+
+	commandName := args[1]
+
+	command := commands.Command{
+		Name:   commandName,
+		Params: args[2:],
+	}
+
+	err = command.Run(state)
 
 	if err != nil {
 		fmt.Println(err)
-		return
+		os.Exit(1)
 	}
-
-	cfg, err = config.ReadConfig()
-
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	fmt.Printf("url: %s\nusername: %s\n", cfg.Db_url, cfg.Current_username)
-
 }

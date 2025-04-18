@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Ciobi0212/gator.git/internal/database"
+	"github.com/Ciobi0212/gator.git/internal/requests"
 	"github.com/Ciobi0212/gator.git/internal/state"
 	"github.com/google/uuid"
 )
@@ -22,6 +23,7 @@ var mapCommands = map[string]func(*state.AppState, []string) error{
 	"register": handleRegister,
 	"reset":    handleReset,
 	"users":    handleUsers,
+	"agg":      handleAgg,
 }
 
 func (c *Command) Run(state *state.AppState) error {
@@ -134,6 +136,17 @@ func handleUsers(state *state.AppState, params []string) error {
 
 		fmt.Println(str)
 	}
+
+	return nil
+}
+
+func handleAgg(state *state.AppState, params []string) error {
+	feed, err := requests.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
+	if err != nil {
+		return fmt.Errorf("err fetching feed: %w", err)
+	}
+
+	fmt.Printf("%#v\n", feed)
 
 	return nil
 }

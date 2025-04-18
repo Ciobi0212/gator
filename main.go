@@ -6,6 +6,7 @@ import (
 
 	"github.com/Ciobi0212/gator.git/internal/commands"
 	"github.com/Ciobi0212/gator.git/internal/state"
+	_ "github.com/lib/pq"
 )
 
 func main() {

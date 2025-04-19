@@ -211,7 +211,6 @@ func handleAgg(state *state.AppState, params []string) error {
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				fmt.Println("No more feeds to fetch")
-				break
 			}
 
 			fmt.Println(fmt.Errorf("error getting next feed to fetch: %w", err))
@@ -250,7 +249,8 @@ func handleAgg(state *state.AppState, params []string) error {
 			)
 
 			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("err creating post: %w", err)
+				fmt.Println(fmt.Errorf("err creating post: %w", err))
+				break
 			}
 		}
 
@@ -336,6 +336,9 @@ func handleFollow(state *state.AppState, params []string, user database.User) er
 
 	feed, err := state.Db.FindFeedByURL(context.Background(), url)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("no feed with specified url exists")
+		}
 		return fmt.Errorf("err follow, can't find feed: %w", err)
 	}
 
@@ -363,13 +366,14 @@ func handleFollowing(state *state.AppState, params []string, user database.User)
 		return errors.New("no params required for following command")
 	}
 
-	feedNames, err := state.Db.GetFeedFollowsForUser(context.Background(), user.ID)
+	results, err := state.Db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
+
 		return fmt.Errorf("err getting feeds for user: %w", err)
 	}
 
-	for _, name := range feedNames {
-		fmt.Println(name)
+	for _, result := range results {
+		fmt.Printf("%s  %s\n", result.Name, result.Url)
 	}
 
 	return nil

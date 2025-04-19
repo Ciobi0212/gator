@@ -93,23 +93,28 @@ WITH feed_follows_entries AS (
     WHERE user_id = $1
 )
 
-SELECT feed.name FROM feed_follows_entries
+SELECT feed.name, feed.url FROM feed_follows_entries
 JOIN feed ON feed.id = feed_follows_entries.feed_id
 `
 
-func (q *Queries) GetFeedFollowsForUser(ctx context.Context, userID uuid.UUID) ([]string, error) {
+type GetFeedFollowsForUserRow struct {
+	Name string
+	Url  string
+}
+
+func (q *Queries) GetFeedFollowsForUser(ctx context.Context, userID uuid.UUID) ([]GetFeedFollowsForUserRow, error) {
 	rows, err := q.db.QueryContext(ctx, getFeedFollowsForUser, userID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []GetFeedFollowsForUserRow
 	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
+		var i GetFeedFollowsForUserRow
+		if err := rows.Scan(&i.Name, &i.Url); err != nil {
 			return nil, err
 		}
-		items = append(items, name)
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

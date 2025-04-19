@@ -17,7 +17,7 @@ WITH feed_follows_entries AS (
     WHERE user_id = $1
 )
 
-SELECT feed.name FROM feed_follows_entries
+SELECT feed.name, feed.url FROM feed_follows_entries
 JOIN feed ON feed.id = feed_follows_entries.feed_id;
 
 -- name: DeleteFeedFollowsEntry :exec

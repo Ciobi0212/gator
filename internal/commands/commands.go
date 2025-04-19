@@ -226,10 +226,10 @@ func handleAgg(state *state.AppState, params []string) error {
 			break
 		}
 
-		for _, item := range rssfeed.Channel.Item {
+		for _, item := range rssfeed.Items {
 			fmt.Println(item.Title)
 
-			publishedAt, err := time.Parse(time.RFC1123, item.PubDate)
+			publishedAt, err := time.Parse(time.RFC1123, item.Published)
 			if err != nil {
 				fmt.Printf("error parsing PubDate: %v\n", err)
 				publishedAt = time.Time{}

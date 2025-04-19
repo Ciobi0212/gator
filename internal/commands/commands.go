@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Ciobi0212/gator.git/internal/database"
@@ -30,6 +31,7 @@ var mapCommands = map[string]func(*state.AppState, []string) error{
 	"follow":    middlewareLoggedIn(handleFollow),
 	"following": middlewareLoggedIn(handleFollowing),
 	"unfollow":  middlewareLoggedIn(handleUnfollow),
+	"browse":    middlewareLoggedIn(handleBrowse),
 }
 
 func registerCommand(name string, fun func(*state.AppState, []string) error) {
@@ -184,18 +186,73 @@ func handleUsers(state *state.AppState, params []string) error {
 }
 
 func handleAgg(state *state.AppState, params []string) error {
-	feed, err := requests.FetchFeed(context.Background(), "https://www.wagslane.dev/index.xml")
-	if err != nil {
-		return fmt.Errorf("err fetching feed: %w", err)
+	if len(params) != 1 {
+		return errors.New("agg command params : <timeBeetweenRequests>")
 	}
 
-	fmt.Printf("%#v\n", feed)
+	timeBetweenRequests, err := time.ParseDuration(params[0])
+	if err != nil {
+		return errors.New("invalid input format, example: agg 1s, agg 1m, agg 1h")
+	}
+
+	ticker := time.NewTicker(timeBetweenRequests)
+	for ; ; <-ticker.C {
+		feed, err := state.Db.GetNextFeedToFetch(context.Background())
+		if err != nil {
+			fmt.Println(fmt.Errorf("error getting next feed to fetch: %w", err))
+			break
+		}
+
+		fmt.Println("-----------" + feed.Name + "-----------")
+
+		rssfeed, err := requests.FetchFeed(context.Background(), feed.Url)
+		if err != nil {
+			fmt.Println(fmt.Errorf("error fetching feed: %w", err))
+			break
+		}
+
+		for _, item := range rssfeed.Channel.Item {
+			fmt.Println(item.Title)
+
+			publishedAt, err := time.Parse(time.RFC1123, item.PubDate)
+			if err != nil {
+				fmt.Printf("error parsing PubDate: %v\n", err)
+				publishedAt = time.Time{}
+			}
+
+			// URL is unique, so if the post already is in the DB it will simply not inserted (see posts.sql)
+			_, err = state.Db.CreatePost(
+				context.Background(),
+				database.CreatePostParams{
+					CreatedAt:   time.Now(),
+					UpdatedAt:   time.Now(),
+					Title:       item.Title,
+					Url:         item.Link,
+					PublishedAt: publishedAt,
+					Description: item.Description,
+					FeedID:      feed.ID,
+				},
+			)
+
+			if err != nil {
+				return fmt.Errorf("err creating post: %w", err)
+			}
+		}
+
+		err = state.Db.MarkFeedFetched(context.Background(), feed.ID)
+		if err != nil {
+			fmt.Println(fmt.Errorf("error marking feed fetched: %w", err))
+			break
+		}
+
+		fmt.Println("----------------------")
+	}
 
 	return nil
 }
 
 func handleAddfeed(state *state.AppState, params []string, user database.User) error {
-	if len(params) < 2 {
+	if len(params) != 2 {
 		return errors.New("addfeed command needs 2 params: <name> <url>")
 	}
 
@@ -329,6 +386,39 @@ func handleUnfollow(state *state.AppState, params []string, user database.User) 
 
 	if err != nil {
 		return fmt.Errorf("err query deleteFeedFollowsEntry: %w", err)
+	}
+
+	return nil
+}
+
+func handleBrowse(state *state.AppState, params []string, user database.User) error {
+	if len(params) != 1 {
+		return fmt.Errorf("browse command accepts 1 param: <numOfPosts>")
+	}
+
+	limit, err := strconv.Atoi(params[0])
+
+	if err != nil {
+		return errors.New("invalid input, it should be a number")
+	}
+
+	posts, err := state.Db.GetPostsForUser(
+		context.Background(),
+		database.GetPostsForUserParams{
+			UserID: user.ID,
+			Limit:  int32(limit),
+		},
+	)
+
+	if err != nil {
+		return fmt.Errorf("err getting posts for user: %w", err)
+	}
+
+	for _, post := range posts {
+		fmt.Println("------------")
+		fmt.Printf("Title: %s\n", post.Title)
+		fmt.Printf("Link: %s\n", post.Url)
+		fmt.Println("------------")
 	}
 
 	return nil

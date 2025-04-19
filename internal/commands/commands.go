@@ -10,6 +10,7 @@ import (
 	"github.com/Ciobi0212/gator.git/internal/database"
 	"github.com/Ciobi0212/gator.git/internal/requests"
 	"github.com/Ciobi0212/gator.git/internal/state"
+
 	"github.com/google/uuid"
 )
 
@@ -31,11 +32,28 @@ var mapCommands = map[string]func(*state.AppState, []string) error{
 	"unfollow":  middlewareLoggedIn(handleUnfollow),
 }
 
+func registerCommand(name string, fun func(*state.AppState, []string) error) {
+	mapCommands[name] = fun
+}
+
+func InitMapCommand() {
+	registerCommand("login", handleLogin)
+	registerCommand("register", handleRegister)
+	registerCommand("reset", handleReset)
+	registerCommand("users", handleUsers)
+	registerCommand("agg", handleAgg)
+	registerCommand("addfeed", middlewareLoggedIn(handleAddfeed))
+	registerCommand("feeds", handleFeeds)
+	registerCommand("follow", middlewareLoggedIn(handleFollow))
+	registerCommand("following", middlewareLoggedIn(handleFollowing))
+	registerCommand("unfollow", middlewareLoggedIn(handleUnfollow))
+}
+
 func (c *Command) Run(state *state.AppState) error {
 	callback, ok := mapCommands[c.Name]
 
 	if !ok {
-		return errors.New("uknown command")
+		return errors.New("unknown command")
 	}
 
 	err := callback(state, c.Params)

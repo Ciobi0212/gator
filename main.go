@@ -12,6 +12,8 @@ import (
 func main() {
 	state, err := state.GetInitState()
 
+	commands.InitMapCommand()
+
 	if err != nil {
 		fmt.Println(fmt.Errorf("error initiating state: %w", err))
 		return

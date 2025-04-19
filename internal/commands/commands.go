@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -15,53 +16,62 @@ import (
 	"github.com/google/uuid"
 )
 
+// Command names constants
+const (
+	CmdLogin     = "login"
+	CmdRegister  = "register"
+	CmdReset     = "reset"
+	CmdUsers     = "users"
+	CmdAgg       = "agg"
+	CmdAddFeed   = "addfeed"
+	CmdFeeds     = "feeds"
+	CmdFollow    = "follow"
+	CmdFollowing = "following"
+	CmdUnfollow  = "unfollow"
+	CmdBrowse    = "browse"
+	CmdHelp      = "help"
+)
+
 type Command struct {
 	Name   string
 	Params []string
 }
 
-var mapCommands = map[string]func(*state.AppState, []string) error{
-	"login":     handleLogin,
-	"register":  handleRegister,
-	"reset":     handleReset,
-	"users":     handleUsers,
-	"agg":       handleAgg,
-	"addfeed":   middlewareLoggedIn(handleAddfeed),
-	"feeds":     handleFeeds,
-	"follow":    middlewareLoggedIn(handleFollow),
-	"following": middlewareLoggedIn(handleFollowing),
-	"unfollow":  middlewareLoggedIn(handleUnfollow),
-	"browse":    middlewareLoggedIn(handleBrowse),
-}
+var mapCommands = make(map[string]func(*state.AppState, []string) error)
 
 func registerCommand(name string, fun func(*state.AppState, []string) error) {
+	if _, exists := mapCommands[name]; exists {
+		log.Printf("Warning: Command '%s' is being registered more than once.", name)
+	}
 	mapCommands[name] = fun
 }
 
 func InitMapCommand() {
-	registerCommand("login", handleLogin)
-	registerCommand("register", handleRegister)
-	registerCommand("reset", handleReset)
-	registerCommand("users", handleUsers)
-	registerCommand("agg", handleAgg)
-	registerCommand("addfeed", middlewareLoggedIn(handleAddfeed))
-	registerCommand("feeds", handleFeeds)
-	registerCommand("follow", middlewareLoggedIn(handleFollow))
-	registerCommand("following", middlewareLoggedIn(handleFollowing))
-	registerCommand("unfollow", middlewareLoggedIn(handleUnfollow))
+	registerCommand(CmdLogin, handleLogin)
+	registerCommand(CmdRegister, handleRegister)
+	registerCommand(CmdReset, handleReset)
+	registerCommand(CmdUsers, handleUsers)
+	registerCommand(CmdAgg, handleAgg)
+	registerCommand(CmdAddFeed, middlewareLoggedIn(handleAddfeed))
+	registerCommand(CmdFeeds, handleFeeds)
+	registerCommand(CmdFollow, middlewareLoggedIn(handleFollow))
+	registerCommand(CmdFollowing, middlewareLoggedIn(handleFollowing))
+	registerCommand(CmdUnfollow, middlewareLoggedIn(handleUnfollow))
+	registerCommand(CmdBrowse, middlewareLoggedIn(handleBrowse))
+	registerCommand(CmdHelp, handleHelp)
 }
 
 func (c *Command) Run(state *state.AppState) error {
 	callback, ok := mapCommands[c.Name]
 
 	if !ok {
-		return errors.New("unknown command")
+		return fmt.Errorf("unknown command: %s", c.Name)
 	}
 
 	err := callback(state, c.Params)
 
 	if err != nil {
-		return fmt.Errorf("error running command: %w", err)
+		return fmt.Errorf("error running command '%s': %w", c.Name, err)
 	}
 
 	return nil
@@ -199,6 +209,11 @@ func handleAgg(state *state.AppState, params []string) error {
 	for ; ; <-ticker.C {
 		feed, err := state.Db.GetNextFeedToFetch(context.Background())
 		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				fmt.Println("No more feeds to fetch")
+				break
+			}
+
 			fmt.Println(fmt.Errorf("error getting next feed to fetch: %w", err))
 			break
 		}
@@ -234,7 +249,7 @@ func handleAgg(state *state.AppState, params []string) error {
 				},
 			)
 
-			if err != nil {
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
 				return fmt.Errorf("err creating post: %w", err)
 			}
 		}
@@ -420,6 +435,76 @@ func handleBrowse(state *state.AppState, params []string, user database.User) er
 		fmt.Printf("Link: %s\n", post.Url)
 		fmt.Println("------------")
 	}
+
+	return nil
+}
+
+func handleHelp(state *state.AppState, params []string) error {
+	fmt.Println("Gator - RSS Feed Aggregator")
+	fmt.Println("===========================")
+	fmt.Println()
+
+	// App description
+	fmt.Println("ABOUT:")
+	fmt.Println("  Gator is a command-line RSS feed aggregator that helps you follow")
+	fmt.Println("  and discover content from your favorite websites using RSS feeds.")
+	fmt.Println("  It allows you to register as a user, subscribe to multiple feeds,")
+	fmt.Println("  and browse the latest posts all from your terminal.")
+	fmt.Println()
+
+	fmt.Println("HOW IT WORKS:")
+	fmt.Println("  1. Register or login to your account")
+	fmt.Println("  2. Add or follow RSS feeds you're interested in")
+	fmt.Println("  3. Start the aggregator to fetch the latest content")
+	fmt.Println("  4. Browse posts from your followed feeds")
+	fmt.Println()
+
+	fmt.Println("WORKFLOW EXAMPLE:")
+	fmt.Println("  ./gator register john         # Create a user account")
+	fmt.Println("  ./gator addfeed 'Tech News' https://example.com/rss  # Add a feed")
+	fmt.Println("  ./gator agg 10m &             # Start aggregation in background (every 10 min)")
+	fmt.Println("  ./gator browse 20             # View the 20 most recent posts")
+	fmt.Println()
+
+	fmt.Println("AVAILABLE COMMANDS:")
+	fmt.Println()
+
+	// User management commands
+	fmt.Println("User Management:")
+	fmt.Println("  register <username>       - Create a new user account and login")
+	fmt.Println("  login <username>          - Login as an existing user")
+	fmt.Println("  users                     - List all registered users")
+
+	// Feed management commands
+	fmt.Println()
+	fmt.Println("Feed Management:")
+	fmt.Println("  addfeed <name> <url>      - Add a new RSS feed and follow it (requires login)")
+	fmt.Println("  feeds                     - List all available feeds")
+	fmt.Println("  follow <url>              - Follow an existing feed (requires login)")
+	fmt.Println("  following                 - List all feeds you're following (requires login)")
+	fmt.Println("  unfollow <url>            - Unfollow a feed (requires login)")
+
+	// Content viewing commands
+	fmt.Println()
+	fmt.Println("Content:")
+	fmt.Println("  browse <limit>            - View posts from feeds you follow (requires login)")
+	fmt.Println("                              limit: number of posts to display")
+
+	// System commands
+	fmt.Println()
+	fmt.Println("System:")
+	fmt.Println("  agg <interval>            - Start feed aggregation process")
+	fmt.Println("                              interval: time between fetches (e.g., 1s, 1m, 1h)")
+	fmt.Println("  reset                     - Delete all users and feeds (use with caution)")
+	fmt.Println("  help                      - Display this help information")
+
+	// Examples
+	fmt.Println()
+	fmt.Println("Examples:")
+	fmt.Println("  ./gator register john     - Create a user named 'john'")
+	fmt.Println("  ./gator addfeed 'Boot.dev Blog' https://blog.boot.dev/index.xml")
+	fmt.Println("  ./gator agg 30s           - Fetch new content every 30 seconds")
+	fmt.Println("  ./gator browse 10         - Show the 10 most recent posts")
 
 	return nil
 }

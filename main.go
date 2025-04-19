@@ -22,8 +22,16 @@ func main() {
 	args := os.Args
 
 	if len(args) < 2 {
-		fmt.Println("Not enough args we're given")
-		os.Exit(1)
+		// Show help information instead of error when no arguments are provided
+		helpCommand := commands.Command{
+			Name:   "help",
+			Params: []string{},
+		}
+		err = helpCommand.Run(state)
+		if err != nil {
+			fmt.Println(err)
+		}
+		return
 	}
 
 	commandName := args[1]

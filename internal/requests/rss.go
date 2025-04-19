@@ -5,7 +5,6 @@ import (
 	"encoding/xml"
 	"fmt"
 	"html"
-	"io"
 	"net/http"
 )
 
@@ -40,19 +39,19 @@ func FetchFeed(ctx context.Context, feedUrl string) (RSSFeed, error) {
 
 	defer res.Body.Close()
 
-	bytes, err := io.ReadAll(res.Body)
-	if err != nil {
-		return RSSFeed{}, fmt.Errorf("err reading response bytes: %w", err)
-	}
-
 	var feed RSSFeed
 
-	err = xml.Unmarshal(bytes, &feed)
+	decoder := xml.NewDecoder(res.Body)
+	decoder.Entity = xml.HTMLEntity
+	decoder.Strict = false
+
+	err = decoder.Decode(&feed)
 	if err != nil {
-		return RSSFeed{}, fmt.Errorf("err unmashaling xml: %w", err)
+		return RSSFeed{}, fmt.Errorf("err decoding xml: %w", err)
 	}
 
 	// Clean the fetched data
+	fmt.Println(feed)
 	feed.Channel.Title = html.UnescapeString(feed.Channel.Title)
 	feed.Channel.Description = html.UnescapeString(feed.Channel.Description)
 

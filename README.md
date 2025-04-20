@@ -2,7 +2,6 @@
 
 ![Gator Logo](https://img.shields.io/badge/Gator-RSS%20Feed%20Aggregator-green)
 ![Go Version](https://img.shields.io/badge/Go-1.21%2B-blue)
-![License](https://img.shields.io/badge/License-MIT-yellow)
 
 Gator is a powerful command-line RSS feed aggregator built in Go that helps you follow and discover content from your favorite websites without leaving your terminal.
 
@@ -148,4 +147,3 @@ If you encounter issues with certain feeds not parsing correctly, try these solu
 
 1. Verify the feed URL is correct and accessible
 2. Check that the feed is a valid RSS format
-3. Some feeds may have special characters that require additional handling

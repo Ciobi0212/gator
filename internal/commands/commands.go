@@ -289,6 +289,12 @@ func parseFeedTime(dateString string) (time.Time, error) {
 func scrapeFeed(feed database.Feed, state *state.AppState, wg *sync.WaitGroup) {
 	defer wg.Done()
 
+	err := state.Db.MarkFeedFetched(context.Background(), feed.ID)
+	if err != nil {
+		fmt.Println(fmt.Errorf("error marking feed %s fetched: %w", feed.Name, err))
+		return
+	}
+
 	rssfeed, err := requests.FetchFeed(context.Background(), feed.Url)
 	if err != nil {
 		fmt.Println(fmt.Errorf("error fetching feed %s : %w", feed.Name, err))
@@ -322,12 +328,6 @@ func scrapeFeed(feed database.Feed, state *state.AppState, wg *sync.WaitGroup) {
 			fmt.Println(fmt.Errorf("err creating post %s: %w", item.Title, err))
 			continue
 		}
-	}
-
-	err = state.Db.MarkFeedFetched(context.Background(), feed.ID)
-	if err != nil {
-		fmt.Println(fmt.Errorf("error marking feed %s fetched: %w", feed.Name, err))
-		return
 	}
 }
 

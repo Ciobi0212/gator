@@ -16,6 +16,23 @@ import (
 	"github.com/google/uuid"
 )
 
+// UserFacingError is used to abstract the user from internal errors and only show if he did something wrong
+type UserFacingError struct {
+	Message    string
+	Suggestion string
+}
+
+func (e *UserFacingError) Error() string {
+	return fmt.Sprintf("%s\n%s\n", e.Message, e.Suggestion)
+}
+
+func NewUserFacingError(message string, suggestion string) error {
+	return &UserFacingError{
+		Message:    message,
+		Suggestion: suggestion,
+	}
+}
+
 // Command names constants
 const (
 	CmdLogin     = "login"
@@ -65,7 +82,7 @@ func (c *Command) Run(state *state.AppState) error {
 	callback, ok := mapCommands[c.Name]
 
 	if !ok {
-		return fmt.Errorf("unknown command: %s", c.Name)
+		return NewUserFacingError("unknown command "+c.Name, "")
 	}
 
 	err := callback(state, c.Params)
@@ -83,7 +100,7 @@ func middlewareLoggedIn(handler func(*state.AppState, []string, database.User) e
 		user, err := state.Db.FindUserByName(context.Background(), state.Cfg.Current_username)
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
-				return errors.New("no such user exists, register and try again")
+				return NewUserFacingError("user from config not found in database", "try to register first")
 			}
 			return fmt.Errorf("err exec query find user by name: %w", err)
 		}
@@ -96,7 +113,7 @@ func middlewareLoggedIn(handler func(*state.AppState, []string, database.User) e
 
 func handleLogin(state *state.AppState, params []string) error {
 	if len(params) != 1 {
-		return errors.New("login command expects 1 param : <username>")
+		return NewUserFacingError("login command expects 1 param : <username>", "e.g: gator login paul")
 	}
 
 	username := params[0]
@@ -108,7 +125,7 @@ func handleLogin(state *state.AppState, params []string) error {
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("user doesn't exist in db, register first")
+			return NewUserFacingError("user not found in database", "try to register first")
 		}
 		return fmt.Errorf("error finding user by name: %w", err)
 	}
@@ -126,7 +143,7 @@ func handleLogin(state *state.AppState, params []string) error {
 
 func handleRegister(state *state.AppState, params []string) error {
 	if len(params) != 1 {
-		return errors.New("register command expects 1 param : <username>")
+		return NewUserFacingError("register command expects 1 param : <username>", "e.g: gator register paul")
 	}
 
 	username := params[0]
@@ -158,6 +175,7 @@ func handleRegister(state *state.AppState, params []string) error {
 
 func handleReset(state *state.AppState, params []string) error {
 	err := state.Db.DeleteAllUsers(context.Background())
+
 	if err != nil {
 		return fmt.Errorf("error del users: %w", err)
 	}
@@ -197,12 +215,12 @@ func handleUsers(state *state.AppState, params []string) error {
 
 func handleAgg(state *state.AppState, params []string) error {
 	if len(params) != 1 {
-		return errors.New("agg command params : <timeBeetweenRequests>")
+		return NewUserFacingError("agg command params : <timeBeetweenRequests>", "e.g: gator agg 10m")
 	}
 
 	timeBetweenRequests, err := time.ParseDuration(params[0])
 	if err != nil {
-		return errors.New("invalid input format, example: agg 1s, agg 1m, agg 1h")
+		return NewUserFacingError("invalid input format", "e.g: 10m, 1s, 2h")
 	}
 
 	ticker := time.NewTicker(timeBetweenRequests)
@@ -268,7 +286,7 @@ func handleAgg(state *state.AppState, params []string) error {
 
 func handleAddfeed(state *state.AppState, params []string, user database.User) error {
 	if len(params) != 2 {
-		return errors.New("addfeed command needs 2 params: <name> <url>")
+		return NewUserFacingError("addfeed command needs 2 params: <name> <url>", "e.g: gator addfeed example htttp://example.com/feed")
 	}
 
 	name, url := params[0], params[1]
@@ -310,7 +328,7 @@ func handleAddfeed(state *state.AppState, params []string, user database.User) e
 
 func handleFeeds(state *state.AppState, params []string) error {
 	if len(params) != 0 {
-		return errors.New("no params required for feeds command")
+		return NewUserFacingError("no params needed for feed command", "e.g: gator feeds")
 	}
 
 	feeds, err := state.Db.GetAllFeeds(context.Background())
@@ -329,7 +347,7 @@ func handleFeeds(state *state.AppState, params []string) error {
 
 func handleFollow(state *state.AppState, params []string, user database.User) error {
 	if len(params) != 1 {
-		return errors.New("follow commands needs 1 param: <url>")
+		return NewUserFacingError("follow commands needs 1 param: <url>", "e.g: gator follow http://example.com")
 	}
 
 	url := params[0]
@@ -337,7 +355,7 @@ func handleFollow(state *state.AppState, params []string, user database.User) er
 	feed, err := state.Db.FindFeedByURL(context.Background(), url)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("no feed with specified url exists")
+			return NewUserFacingError("no feed with specified url exists in your db", "use gator feeds to see available feeds or add a new one using gator addfeed")
 		}
 		return fmt.Errorf("err follow, can't find feed: %w", err)
 	}
@@ -363,12 +381,11 @@ func handleFollow(state *state.AppState, params []string, user database.User) er
 
 func handleFollowing(state *state.AppState, params []string, user database.User) error {
 	if len(params) != 0 {
-		return errors.New("no params required for following command")
+		return NewUserFacingError("no params required for following command", "e.g: gator following")
 	}
 
 	results, err := state.Db.GetFeedFollowsForUser(context.Background(), user.ID)
 	if err != nil {
-
 		return fmt.Errorf("err getting feeds for user: %w", err)
 	}
 
@@ -381,7 +398,7 @@ func handleFollowing(state *state.AppState, params []string, user database.User)
 
 func handleUnfollow(state *state.AppState, params []string, user database.User) error {
 	if len(params) != 1 {
-		return errors.New("unfollow command needs 1 param: <url>")
+		return NewUserFacingError("unfollow command needs 1 param: <url>", "e.g: gator unfollow http://example.com")
 	}
 
 	url := params[0]
@@ -389,7 +406,7 @@ func handleUnfollow(state *state.AppState, params []string, user database.User) 
 	feed, err := state.Db.FindFeedByURL(context.Background(), url)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return errors.New("no feed with specified url exists")
+			return NewUserFacingError("no feed with specified url exists in your db", "use gator following to see the feeds you are following")
 		}
 
 		return fmt.Errorf("err query findFeedByUrl: %w", err)
@@ -412,13 +429,13 @@ func handleUnfollow(state *state.AppState, params []string, user database.User) 
 
 func handleBrowse(state *state.AppState, params []string, user database.User) error {
 	if len(params) != 1 {
-		return fmt.Errorf("browse command accepts 1 param: <numOfPosts>")
+		return NewUserFacingError("browse command accepts 1 param: <numOfPosts>", "e.g: gator browse 10")
 	}
 
 	limit, err := strconv.Atoi(params[0])
 
 	if err != nil {
-		return errors.New("invalid input, it should be a number")
+		return NewUserFacingError("input is not number", "e.g: gator browse 10")
 	}
 
 	posts, err := state.Db.GetPostsForUser(

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -43,8 +44,14 @@ func main() {
 
 	err = command.Run(state)
 
+	var userErr *commands.UserFacingError
+
 	if err != nil {
-		fmt.Println(err)
+		if errors.As(err, &userErr) {
+			fmt.Println(userErr)
+		} else {
+			fmt.Println("Internal error, something went wrong")
+		}
 		os.Exit(1)
 	}
 }

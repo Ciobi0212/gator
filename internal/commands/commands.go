@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Ciobi0212/gator.git/internal/database"
@@ -152,8 +153,8 @@ func handleRegister(state *state.AppState, params []string) error {
 		context.Background(),
 		database.CreateUserParams{
 			ID:        uuid.New(),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 			Name:      username,
 		},
 	)
@@ -214,74 +215,120 @@ func handleUsers(state *state.AppState, params []string) error {
 }
 
 func handleAgg(state *state.AppState, params []string) error {
-	if len(params) != 1 {
-		return NewUserFacingError("agg command params : <timeBeetweenRequests>", "e.g: gator agg 10m")
+	if len(params) < 1 || len(params) > 2 {
+		return NewUserFacingError("agg command requires 1-2 params: <interval> [concurrency]", "e.g: gator agg 10m 5")
 	}
 
 	timeBetweenRequests, err := time.ParseDuration(params[0])
 	if err != nil {
-		return NewUserFacingError("invalid input format", "e.g: 10m, 1s, 2h")
+		return NewUserFacingError("invalid input format for interval", "e.g: 10m, 1s, 2h")
+	}
+
+	// Default concurrency to 1 if not specified
+	concurrency := 1
+	if len(params) == 2 {
+		concurrency, err = strconv.Atoi(params[1])
+		if err != nil {
+			return NewUserFacingError("invalid input format for concurrency", "e.g: 1, 5, 10")
+		}
+		if concurrency < 1 {
+			return NewUserFacingError("concurrency must be at least 1", "e.g: 1, 5, 10")
+		}
 	}
 
 	ticker := time.NewTicker(timeBetweenRequests)
+
+	defer ticker.Stop()
+
+	fmt.Printf("Aggregator started with %d concurrent workers, fetching every %v\n", concurrency, timeBetweenRequests)
+
+	wg := sync.WaitGroup{}
+
 	for ; ; <-ticker.C {
-		feed, err := state.Db.GetNextFeedToFetch(context.Background())
-		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				fmt.Println("No more feeds to fetch")
-			}
+		feeds, err := state.Db.GetNextFeedsToFetch(context.Background(), int32(concurrency))
 
+		if err != nil {
 			fmt.Println(fmt.Errorf("error getting next feed to fetch: %w", err))
-			break
+			continue
 		}
 
-		fmt.Println("-----------" + feed.Name + "-----------")
+		fmt.Printf("Fetching %d feeds...\n", len(feeds))
 
-		rssfeed, err := requests.FetchFeed(context.Background(), feed.Url)
-		if err != nil {
-			fmt.Println(fmt.Errorf("error fetching feed: %w", err))
-			break
+		for _, feed := range feeds {
+			wg.Add(1)
+			go scrapeFeed(feed, state, &wg)
 		}
 
-		for _, item := range rssfeed.Items {
-			fmt.Println(item.Title)
-
-			publishedAt, err := time.Parse(time.RFC1123, item.Published)
-			if err != nil {
-				fmt.Printf("error parsing PubDate: %v\n", err)
-				publishedAt = time.Time{}
-			}
-
-			// URL is unique, so if the post already is in the DB it will simply not inserted (see posts.sql)
-			_, err = state.Db.CreatePost(
-				context.Background(),
-				database.CreatePostParams{
-					CreatedAt:   time.Now(),
-					UpdatedAt:   time.Now(),
-					Title:       item.Title,
-					Url:         item.Link,
-					PublishedAt: publishedAt,
-					Description: item.Description,
-					FeedID:      feed.ID,
-				},
-			)
-
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
-				fmt.Println(fmt.Errorf("err creating post: %w", err))
-				break
-			}
-		}
-
-		err = state.Db.MarkFeedFetched(context.Background(), feed.ID)
-		if err != nil {
-			fmt.Println(fmt.Errorf("error marking feed fetched: %w", err))
-			break
-		}
-
-		fmt.Println("----------------------")
+		wg.Wait()
 	}
 
 	return nil
+}
+
+func parseFeedTime(dateString string) (time.Time, error) {
+	var commonFeedDateFormats = []string{
+		time.RFC1123,     // "Mon, 02 Jan 2006 15:04:05 MST"
+		time.RFC1123Z,    // "Mon, 02 Jan 2006 15:04:05 -0700"
+		time.RFC3339,     // "2006-01-02T15:04:05Z07:00" <- Matches your failing examples
+		time.RFC3339Nano, // Like RFC3339 but with nanoseconds
+		time.RFC822,      // "02 Jan 06 15:04 MST"
+		time.RFC822Z,     // "02 Jan 06 15:04 -0700"
+		// Add any other specific formats you encounter frequently
+	}
+
+	for _, format := range commonFeedDateFormats {
+		publishedAt, err := time.Parse(format, dateString)
+		if err == nil {
+			return publishedAt, nil
+		}
+	}
+
+	return time.Time{}, fmt.Errorf("failed to parse date '%s' with known formats", dateString)
+}
+
+func scrapeFeed(feed database.Feed, state *state.AppState, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	rssfeed, err := requests.FetchFeed(context.Background(), feed.Url)
+	if err != nil {
+		fmt.Println(fmt.Errorf("error fetching feed %s : %w", feed.Name, err))
+		return
+	}
+
+	fmt.Printf("Found %v posts on feed %s!\n", len(rssfeed.Items), feed.Name)
+
+	for _, item := range rssfeed.Items {
+		publishedAt, err := parseFeedTime(item.Published)
+		if err != nil {
+			fmt.Printf("error parsing PubDate: %v\n", err)
+			publishedAt = time.Time{}
+		}
+
+		// URL is unique, so if the post already is in the DB it will simply not inserted (see posts.sql)
+		_, err = state.Db.CreatePost(
+			context.Background(),
+			database.CreatePostParams{
+				CreatedAt:   time.Now().UTC(),
+				UpdatedAt:   time.Now().UTC(),
+				Title:       item.Title,
+				Url:         item.Link,
+				PublishedAt: publishedAt,
+				Description: item.Description,
+				FeedID:      feed.ID,
+			},
+		)
+
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			fmt.Println(fmt.Errorf("err creating post %s: %w", item.Title, err))
+			continue
+		}
+	}
+
+	err = state.Db.MarkFeedFetched(context.Background(), feed.ID)
+	if err != nil {
+		fmt.Println(fmt.Errorf("error marking feed %s fetched: %w", feed.Name, err))
+		return
+	}
 }
 
 func handleAddfeed(state *state.AppState, params []string, user database.User) error {
@@ -296,8 +343,8 @@ func handleAddfeed(state *state.AppState, params []string, user database.User) e
 		database.CreateFeedParams{
 			Name:      name,
 			Url:       url,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 		},
 	)
 
@@ -310,8 +357,8 @@ func handleAddfeed(state *state.AppState, params []string, user database.User) e
 		database.CreateFeedFollowParams{
 			UserID:    user.ID,
 			FeedID:    feed.ID,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 		},
 	)
 
@@ -365,8 +412,8 @@ func handleFollow(state *state.AppState, params []string, user database.User) er
 		database.CreateFeedFollowParams{
 			UserID:    user.ID,
 			FeedID:    feed.ID,
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
 		},
 	)
 
@@ -483,7 +530,7 @@ func handleHelp(state *state.AppState, params []string) error {
 	fmt.Println("WORKFLOW EXAMPLE:")
 	fmt.Println("  ./gator register john         # Create a user account")
 	fmt.Println("  ./gator addfeed 'Tech News' https://example.com/rss  # Add a feed")
-	fmt.Println("  ./gator agg 10m &             # Start aggregation in background (every 10 min)")
+	fmt.Println("  ./gator agg 10m 5 &             # Start aggregation in background (every 10 min) with 5 concurrent scrapers")
 	fmt.Println("  ./gator browse 20             # View the 20 most recent posts")
 	fmt.Println()
 
@@ -514,8 +561,9 @@ func handleHelp(state *state.AppState, params []string) error {
 	// System commands
 	fmt.Println()
 	fmt.Println("System:")
-	fmt.Println("  agg <interval>            - Start feed aggregation process")
+	fmt.Println("  agg <interval> [concurrency]  - Start feed aggregation process")
 	fmt.Println("                              interval: time between fetches (e.g., 1s, 1m, 1h)")
+	fmt.Println("                              concurrency: number of feeds to fetch in parallel (default: 1)")
 	fmt.Println("  reset                     - Delete all users and feeds (use with caution)")
 	fmt.Println("  help                      - Display this help information")
 
